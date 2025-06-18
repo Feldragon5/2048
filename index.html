@@ -3,7 +3,7 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Elegant 2048</title>
+		<title>2048</title>
 		<style>
 			:root {
 				--board-size: min(90vw, 500px);
@@ -22,7 +22,8 @@
 
 			body {
 				margin: 0;
-				/* UPDATED: New gradient based on the image */
+				/* Prevent pull-to-refresh and other touch behaviors on the body */
+				overscroll-behavior-y: contain;
 				background: linear-gradient(135deg, #29c2d6, #a700ff);
 				color: white;
 				display: flex;
@@ -60,6 +61,8 @@
 				background-color: rgba(0, 0, 0, 0.2);
 				padding: 10px 25px;
 				border-radius: 10px;
+				/* MODIFICATION: Set a minimum width to prevent resizing */
+				min-width: 120px;
 			}
 
 			.score-title {
@@ -69,7 +72,7 @@
 			}
 
 			#score {
-				font-size: 0.7em;
+				font-size: 1em;
 				margin: 0;
 			}
 
@@ -101,6 +104,8 @@
 				border-radius: 10px;
 				padding: var(--cell-gap);
 				position: relative;
+				/* MODIFICATION: Make the grid a touch target */
+				touch-action: none;
 			}
 
 			.grid-cell {
@@ -146,7 +151,6 @@
 			}
 
 			.tile.merged {
-				/* MODIFICATION: Added z-index to ensure the merge animation is visible on top of other tiles */
 				z-index: 10;
 				animation-name: merge-anim;
 			}
@@ -273,6 +277,9 @@
 			let board = [];
 			let score = 0;
 			let isGameOver = false;
+			// MODIFICATION: Flags for handling animations and touch input
+			let isAnimating = false;
+			let touchStartX, touchStartY;
 
 			// --- Game Setup ---
 			function setupBackgroundGrid() {
@@ -288,6 +295,7 @@
 				document.querySelectorAll(".tile").forEach((t) => t.remove());
 				score = 0;
 				isGameOver = false;
+				isAnimating = false;
 				gameOverOverlay.style.display = "none";
 				updateScore(0, true);
 				addRandomTile();
@@ -322,7 +330,18 @@
 							const sourceIndex2 = cell.from[1];
 							const sourceTile2 = existingTiles.get(sourceIndex2);
 							tilesToRemove.delete(sourceIndex2);
-							if (sourceTile2) sourceTile2.remove();
+
+							if (sourceTile2) {
+								sourceTile2.style.setProperty("--x", x);
+								sourceTile2.style.setProperty("--y", y);
+								sourceTile2.addEventListener(
+									"transitionend",
+									() => {
+										sourceTile2.remove();
+									},
+									{ once: true }
+								);
+							}
 						}
 
 						sourceTile1.style.setProperty("--x", x);
@@ -336,8 +355,9 @@
 								sourceTile1.classList.add("merged");
 								sourceTile1.addEventListener(
 									"animationend",
-									() =>
-										sourceTile1.classList.remove("merged"),
+									() => {
+										sourceTile1.classList.remove("merged");
+									},
 									{ once: true }
 								);
 							}
@@ -391,8 +411,22 @@
 				}
 			}
 
+			// MODIFICATION: Process move logic is now shared
+			function processMove(moved) {
+				if (moved) {
+					isAnimating = true; // Lock input
+					addRandomTile();
+					renderBoard();
+					checkGameOver();
+					// Unlock input after animations are done
+					setTimeout(() => {
+						isAnimating = false;
+					}, 250);
+				}
+			}
+
 			function handleInput(e) {
-				if (isGameOver) return;
+				if (isGameOver || isAnimating) return;
 				let moved = false;
 
 				switch (e.key) {
@@ -411,12 +445,7 @@
 					default:
 						return;
 				}
-
-				if (moved) {
-					addRandomTile();
-					renderBoard();
-					checkGameOver();
-				}
+				processMove(moved);
 			}
 
 			// --- Core Move Functions ---
@@ -588,6 +617,37 @@
 			// --- Event Listeners ---
 			document.addEventListener("keydown", handleInput);
 			newGameButton.addEventListener("click", startGame);
+
+			// --- MODIFICATION: Touch Event Listeners for Mobile ---
+			gridContainer.addEventListener("touchstart", (e) => {
+				touchStartX = e.changedTouches[0].screenX;
+				touchStartY = e.changedTouches[0].screenY;
+			});
+
+			gridContainer.addEventListener("touchend", (e) => {
+				if (isGameOver || isAnimating) return;
+
+				const touchEndX = e.changedTouches[0].screenX;
+				const touchEndY = e.changedTouches[0].screenY;
+
+				const diffX = touchEndX - touchStartX;
+				const diffY = touchEndY - touchStartY;
+				const swipeThreshold = 50; // Minimum distance for a swipe
+				let moved = false;
+
+				if (Math.abs(diffX) > Math.abs(diffY)) {
+					// Horizontal swipe
+					if (Math.abs(diffX) > swipeThreshold) {
+						moved = diffX > 0 ? moveRight() : moveLeft();
+					}
+				} else {
+					// Vertical swipe
+					if (Math.abs(diffY) > swipeThreshold) {
+						moved = diffY > 0 ? moveDown() : moveUp();
+					}
+				}
+				processMove(moved);
+			});
 
 			// --- Initial Start ---
 			setupBackgroundGrid();
